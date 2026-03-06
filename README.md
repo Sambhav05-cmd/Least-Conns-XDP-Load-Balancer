@@ -203,3 +203,11 @@ scripts/        Utility scripts
 
 - Root privileges are required to attach XDP programs.
 - The system must support **eBPF and XDP** (modern Linux kernel recommended).
+
+## References
+
+- Teodor Podobnik – XDP Load Balancer Tutorial  
+  https://labs.iximiuz.com/tutorials/xdp-load-balancer-700a1d74
+
+- iximiuz Labs – Practical Linux networking and eBPF tutorials  
+  https://labs.iximiuz.com/
