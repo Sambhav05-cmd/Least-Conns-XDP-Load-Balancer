@@ -66,12 +66,18 @@ Example:
   ]
 }
 ```
-
+You can edit this file and add the IPs of your backend servers.
 Backends can also be **added or removed dynamically at runtime** through CLI commands.
 
 ---
 
 ## Running the Load Balancer
+
+To install all dependencies run 
+```bash
+sudo ./scripts/llvm.sh
+
+```
 
 From the repository root:
 
@@ -189,6 +195,10 @@ scripts/        Utility scripts
 ```
 
 ---
+
+## Testing accuracy
+
+## Testing overhead
 
 ## Technologies Used
 
