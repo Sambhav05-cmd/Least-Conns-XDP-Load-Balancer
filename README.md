@@ -1,196 +1,210 @@
 # XDP Least-Connections Load Balancer
 
-This project implements a NAT-based TCP load balancer using eBPF at the XDP layer.  
-It distributes incoming connections across backend servers using the least-connections scheduling algorithm.
+A NAT-based TCP load balancer implemented in eBPF at the XDP layer. Distributes incoming connections across backend servers using the **least-connections** scheduling algorithm, with backends manageable at runtime via an interactive CLI.
 
-Running the load balancer at XDP (eXpress Data Path) allows packets to be processed before entering the Linux networking stack. This removes a large portion of the traditional networking overhead and allows packets to be handled with very low latency.
+> **Why XDP?** Packets are processed before entering the Linux networking stack — minimal CPU overhead, maximum throughput.
+
+---
+
+## Table of Contents
+
+- [Overview](#overview)
+- [Connection Tracking Modes](#connection-tracking-modes)
+- [Repository Structure](#repository-structure)
+- [Prerequisites](#prerequisites)
+- [Configuration](#configuration)
+- [Building](#building)
+- [Running](#running)
+- [Runtime CLI](#runtime-cli)
+- [Testing](#testing)
+- [Customization](#customization)
+- [References](#references)
 
 ---
 
 ## Overview
 
-The load balancer performs connection-aware traffic distribution in the following way.
-
-Each incoming TCP connection is assigned to the backend server that currently has the lowest number of active connections. The XDP program keeps track of connection state by observing TCP flags and maintaining lightweight connection tracking structures in eBPF maps.
-
-Packet processing happens entirely inside an XDP eBPF program. The program inspects packets immediately when they arrive on the network interface and performs NAT-based redirection to the selected backend server.
-
-Because the load balancer runs at the XDP layer, packets are processed before entering the normal Linux networking stack. This significantly reduces overhead and allows the system to scale to high packet rates with minimal CPU usage.
+Each incoming TCP connection is assigned to the backend with the fewest active connections. The XDP eBPF program tracks connection state by inspecting TCP flags and maintaining lightweight per-connection structures in eBPF maps. Because everything runs at the XDP layer, packets are intercepted on arrival — before the kernel's normal network stack — keeping overhead very low.
 
 ---
-## Two Connection Tracking Modes
 
-This repository provides two connection tracking modes for the least-connections algorithm. Both use the same scheduling logic but differ in when a connection is counted.
+## Connection Tracking Modes
 
-In the first mode, a connection is counted only after the TCP handshake completes (when the first non-SYN packet is observed). This ensures the counters reflect only fully established connections. However, when many connections start simultaneously, several SYN packets may see the same backend counters before they update, which can temporarily skew the distribution.
+Two builds are provided, differing only in *when* a connection is counted:
 
-In the second mode, the counter is incremented as soon as a SYN packet arrives. This effectively reserves the backend at the start of the handshake, which results in more accurate load balancing during bursts of concurrent connections. The tradeoff is that connections that never complete the handshake may be briefly counted until they are cleaned up.
+| Mode | Counts on | Pros | Cons |
+|------|-----------|------|------|
+| **Established** | First non-SYN packet (after handshake completes) | Counters reflect only fully established connections | Under burst load, multiple SYNs may see stale counters before they update |
+| **SYN** | SYN packet arrival | Reserves backend immediately; more even distribution during bursts | Incomplete handshakes are briefly counted until cleaned up |
+
+---
+
+## Repository Structure
+
+```
+.
+├── bpf/            # eBPF/XDP load balancer program (C)
+├── cmd/lb/         # Go user-space loader and CLI
+├── configs/        # Backend configuration file
+└── scripts/        # Utility scripts
+```
+
+---
+
+## Prerequisites
+
+Install LLVM and required toolchain dependencies:
+
+```bash
+sudo ./scripts/llvm.sh
+```
+
+> **Requirements:** Root privileges, a modern Linux kernel with eBPF and XDP support.
+
 ---
 
 ## Configuration
 
-Initial backend servers are defined in the file:
+Initial backends are defined in `configs/backends.json`:
 
-configs/backends.json
-
-Example configuration:
-
+```json
 {
   "backends": [
     "10.0.0.2",
     "10.0.0.3"
   ]
 }
+```
 
-You can edit this file and add the IP addresses of your backend servers.  
-Backends can also be added or removed dynamically while the load balancer is running through CLI commands.
-
----
-
-## Running the Load Balancer
-
-First install the required dependencies:
-
-sudo ./scripts/llvm.sh
-
-From the repository root run:
-
-go generate ./cmd/lb
-go build -o lb ./cmd/lb
-sudo ./lb -i <network-interface> -config configs/backends.json
-
-Example:
-
-sudo ./lb -i wlo1 -config configs/backends.json
+Edit this file before starting, or manage backends live via the CLI (see below).
 
 ---
 
-## Runtime CLI Commands
+## Building
 
-After starting the program an interactive CLI becomes available:
+Both binaries are built from the same source using build tags.
 
+**Established-connections version:**
+
+```bash
+go generate -tags established ./cmd/lb
+go build -tags established -o lb_established ./cmd/lb
+```
+
+**SYN-connections version:**
+
+```bash
+go generate -tags syn ./cmd/lb
+go build -tags syn -o lb_syn ./cmd/lb
+```
+
+---
+
+## Running
+
+```bash
+# Established-connections version
+sudo ./lb_established -i <network-interface> -config configs/backends.json
+
+# SYN-connections version
+sudo ./lb_syn -i <network-interface> -config configs/backends.json
+```
+
+Replace `<network-interface>` with the interface you want to attach the XDP program to (e.g. `eth0`).
+
+---
+
+## Runtime CLI
+
+After starting, an interactive prompt becomes available:
+
+```
 lb>
+```
 
-The following commands can be used:
+| Command | Description |
+|---------|-------------|
+| `add <ip>` | Add a backend server |
+| `del <ip>` | Remove a backend server |
+| `list` | List backends and their current connection counts |
 
-add <ip>     Add a backend server  
-del <ip>     Remove a backend server  
-list         List current backends and connection counts  
+**Example session:**
 
-Example usage:
-
-lb> add 10.0.0.4  
-lb> del 10.0.0.3  
-lb> list  
-
-The list command displays the backend servers currently registered along with the number of active connections each backend has.
+```
+lb> add 10.0.0.4
+lb> del 10.0.0.3
+lb> list
+```
 
 ---
 
-## Observing eBPF Programs
+### Verifying the XDP Program is Attached
 
-You can verify that the XDP program is attached using:
-
+```bash
 sudo bpftool prog show
-
-This allows you to confirm that the eBPF program is successfully loaded and attached to the network interface.
+```
 
 ---
 
-## Testing the Load Balancer
+## Testing
 
-### Start backend servers
+### 1. Start backend servers
 
-On each backend machine run:
+Run this on each backend machine:
 
+```bash
 python3 -m http.server 8000
+```
 
----
+### 2. Send a single request
 
-### Send requests to the load balancer
+From a client machine:
 
-From a client machine you can send requests using curl:
-
+```bash
 curl -v --http1.1 http://<load-balancer-ip>:8000
+```
 
-Using HTTP/1.1 keeps the connection open for a short period of time, which makes it easier to observe the behavior of the connection counters.
+> Using `--http1.1` keeps the connection open briefly, making it easier to observe connection counters.
 
----
+### 3. Simulate high concurrency
 
-## Testing under high connection load(multiple connection requests simultaneously)
+Launch 100 parallel requests simultaneously:
 
-To simulate a large number of simultaneous clients you can run:
+```bash
+seq 100 | xargs -n1 -P100 -I{} curl -s --http1.1 http://<load-balancer-ip>:8000 > /dev/null
+```
 
-seq 100 | xargs -n1 -P100 -I{} curl -s --http1.1 http://10.45.179.173:8000 > /dev/null
+### 4. Check active kernel TCP connections
 
-This command launches one hundred curl requests in parallel and sends them to the load balancer.
+While the test is running:
 
----
+```bash
+ss -tan '( sport = :8000 )' | wc -l
+```
 
-## Checking Kernel TCP Connections
+### 5. Observe backend distribution
 
-While the test is running you can check the number of active TCP connections with:
+Inside the load balancer CLI:
 
-ss -tan '( sport = :8000)' | wc -l
+```
+lb> list
+```
 
-This command counts all TCP sockets currently using port 8000.
-
----
-
-## Observing Backend Distribution
-
-While connections are active you can type the following command inside the load balancer CLI:
-
-list
-
-This prints the number of connections currently assigned to each backend server. It allows you to directly observe how the least-connections algorithm distributes traffic.
-
-If many connections start at the same time you may notice that the established-counting version can briefly produce uneven distribution. The SYN-counting version typically handles large bursts of concurrent connections more evenly because it increments the counters immediately when SYN packets arrive.
+This prints the connection count per backend in real time. Under burst load you may notice the **established** version distributes less evenly than the **SYN** version, because SYN-counting reserves backends at handshake start.
 
 ---
 
 ## Customization
 
-The current implementation balances traffic only for TCP port 8000.
+The load balancer currently filters on **TCP port 8000**. To change this, edit the port filter in the eBPF program:
 
-This can be changed directly in the eBPF program located at:
-
+```
 bpf/lb.c
-
-By modifying the port filter the load balancer can be adapted to handle other services.
-
----
-
-## Repository Structure
-
-bpf/            eBPF/XDP load balancer program  
-cmd/lb/         Go user-space loader and CLI  
-configs/        Backend configuration file  
-scripts/        Utility scripts  
-
----
-
-## Technologies Used
-
-eBPF  
-XDP (eXpress Data Path)  
-Go  
-Linux networking
-
----
-
-## Notes
-
-Root privileges are required to attach XDP programs.
-
-The system must support eBPF and XDP. A modern Linux kernel is recommended.
+```
 
 ---
 
 ## References
 
-Teodor Podobnik – XDP Load Balancer Tutorial  
-https://labs.iximiuz.com/tutorials/xdp-load-balancer-700a1d74
-
-iximiuz Labs – Practical Linux networking and eBPF tutorials  
-https://labs.iximiuz.com/
+- [Teodor Podobnik – XDP Load Balancer Tutorial](https://labs.iximiuz.com/tutorials/xdp-load-balancer-700a1d74)
+- [iximiuz Labs – Practical Linux networking and eBPF tutorials](https://labs.iximiuz.com/)
