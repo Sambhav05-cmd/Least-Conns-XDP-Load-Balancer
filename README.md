@@ -233,10 +233,13 @@ Under burst load, the **SYN** variants distribute more evenly than the **establi
 
 ## Customization
 
-The load balancer currently filters on **TCP port 8000**. To change this, edit the port filter in the eBPF program:
+The load balancer currently filters on **TCP port 8000**. To change this, edit the port filter in the eBPF programs:
 
 ```
-bpf/lb.c
+bpf/lb_lc_syn.c
+bpf/lb_lc_est.c
+bpf/lb_wlc_syn.c
+bpf/lb_wlc_est.c
 ```
 
 ---
