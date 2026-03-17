@@ -30,7 +30,16 @@ A NAT-based TCP load balancer implemented in eBPF at the XDP layer. Supports two
 
 ## Overview
 
-Each incoming TCP connection is assigned to a backend according to the active scheduling algorithm. The XDP eBPF program tracks connection state by inspecting TCP flags and maintaining lightweight per-connection structures in eBPF maps. Because everything runs at the XDP layer, packets are intercepted on arrival — before the kernel's normal network stack — keeping overhead very low.
+This project implements a stateful Layer-4 load balancer with full network address translation (NAT) in the eBPF/XDP fast path.
+Incoming TCP flows destined for configured virtual service endpoints (VIP–port pairs) are intercepted at the earliest point in the Linux receive path and dynamically steered to backend servers using adaptive connection-aware scheduling.
+
+Unlike stateless hashing-based dataplane designs, the load balancer maintains per-connection state directly inside eBPF maps, enabling real-time backend selection based on active connection counts and configurable backend weights.
+Both forward and reverse packet paths are rewritten entirely in the XDP layer, providing complete NAT semantics including source-port translation, symmetric return routing, and deterministic connection teardown handling.
+
+The dataplane supports multiple concurrent virtual services, dynamic backend pool updates at runtime, and two scheduling strategies — Least Connections and Weighted Least Connections — each with selectable connection accounting modes.
+Because all packet classification, scheduling, connection tracking, and address rewriting occur before socket buffer allocation, the design achieves very low processing latency and high throughput under connection-heavy workloads.
+
+This architecture allows the load balancer to adapt to skewed or persistent traffic patterns while retaining the performance advantages of early-ingress packet processing.
 
 ---
 
@@ -183,6 +192,8 @@ This produces:
 ---
 
 ## Running
+Choose whichever mode load balancer to run.
+Recommended mode is the "syn" mode over the "est" mode for burst of connections, however, you can use "est" for experiment or more stable connection requests
 
 **LC binaries:**
 
@@ -214,25 +225,31 @@ lb>
 
 | Command | Description |
 |---------|-------------|
-| `add <ip>` | Add a backend server |
-| `del <ip>` | Remove a backend server |
+| `add <ip> <port>` | Add a backend server |
+| `del <ip> <port>` | Remove a backend server |
 | `list` | List backends and their current connection counts |
+| `addsvc <ip> <port>` | Add a service endpoint |
+| `delsvc <ip> <port>` | Remove a service endpoint |
+| `list` | List service endpoints |
 
 ### WLC commands
 
 | Command | Description |
 |---------|-------------|
-| `add <ip> <weight>` | Add a backend server with a given weight |
-| `del <ip>` | Remove a backend server |
-| `update <ip> <weight>` | Update the weight of an existing backend |
+| `add <ip> <port> <weight>` | Add a backend server with a given weight |
+| `del <ip> <port>` | Remove a backend server |
+| `update <ip> <port> <weight>` | Update the weight of an existing backend |
 | `list` | List backends with their weights and connection counts |
+| `addsvc <ip> <port>` | Add a service endpoint |
+| `delsvc <ip> <port>` | Remove a service endpoint |
+| `list` | List service endpoints |
 
 **Example session (WLC):**
 
 ```
-lb> add 10.0.0.4 2
-lb> update 10.0.0.2 3
-lb> del 10.0.0.3
+lb> add 10.0.0.4 8000 20
+lb> update 10.0.0.2 30
+lb> del 10.0.0.3 8001
 lb> list
 ```
 
