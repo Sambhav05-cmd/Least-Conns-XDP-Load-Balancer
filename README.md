@@ -16,7 +16,7 @@ Traffic is steered only for configured services, allowing unrelated network flow
 ## Table of Contents
 
 - [Overview](#overview)
-- [Key capabilities](#Key capabilities)
+- [Key capabilities](#Key-capabilities)
 - [Why least connections instead of hashing](#Why-least-connections-instead-of-hashing)
 - [Suitable Deployment Scenarios](#Suitable-Deployment-Scenarios)
 - [Scheduling Algorithms](#scheduling-algorithms)
