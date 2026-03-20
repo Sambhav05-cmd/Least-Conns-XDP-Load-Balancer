@@ -49,17 +49,12 @@ This architecture allows the load balancer to adapt to skewed or persistent traf
 ---
 
 ## Key capabilities
--Least-Connections and Weighted Least-Connections scheduling
-
--In-datapath TCP connection tracking
-
--Full NAT (forward and reverse path rewriting)
-
--Multiple virtual services (VIP–port endpoints) with runtime add/remove support
-
--Runtime backend addition, removal, and weight updates
-
--Stable traffic distribution under bursty or long-lived connections
+- Least-Connections and Weighted Least-Connections scheduling
+- In-datapath TCP connection tracking
+- Full NAT (forward and reverse path rewriting)
+- Multiple virtual services (VIP–port endpoints) with runtime add/remove support
+- Runtime backend addition, removal, and weight updates
+- Stable traffic distribution under bursty or long-lived connections
 
 Because scheduling decisions are made using real-time connection counts, the load balancer adapts automatically to uneven traffic patterns and backend capacity differences while retaining the performance benefits of early ingress processing with XDP.
 
@@ -99,9 +94,9 @@ This design trades modest state-management overhead for **improved utilisation f
 ---
 ## Suitable Deployment Scenarios
 - Backend identity must remain private : Full NAT hides real server IPs and prevents clients from directly addressing backend nodes.
--Controlled ingress or gateway-style deployments : Centralised entry point simplifies firewalling, policy enforcement, and network segmentation.
--Persistent or long-lived connection workloads : Better distribution than hash-based scheduling for WebSockets, streaming services, or database sessions.
--Heterogeneous backend capacity : Weighted least-connections enables proportional load distribution across unequal servers.
+- Controlled ingress or gateway-style deployments : Centralised entry point simplifies firewalling, policy enforcement, and network segmentation.
+- Persistent or long-lived connection workloads : Better distribution than hash-based scheduling for WebSockets, streaming services, or database sessions.
+- Heterogeneous backend capacity : Weighted least-connections enables proportional load distribution across unequal servers.
 
 High concurrent connection environments
 XDP fast-path processing keeps per-packet overhead low even with stateful scheduling.
